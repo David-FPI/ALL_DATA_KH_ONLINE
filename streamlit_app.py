@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import re
 import io
-
 # ==============================
 # Hàm chuẩn hóa số điện thoại
 import re
@@ -10,27 +9,8 @@ import pandas as pd
 import phonenumbers
 from phonenumbers import geocoder
 
-# Danh sách mã quốc gia phổ biến cần auto-thêm dấu +
-COUNTRY_CODES = {
-    '886': 'Taiwan',
-    '1': 'USA/Canada',
-    '81': 'Japan',
-    '82': 'South Korea',
-    '85': 'Hong Kong',
-    '86': 'China',
-    '855': 'Cambodia',
-    '856': 'Laos',
-    '95': 'Myanmar',
-    '44': 'UK',
-    '61': 'Australia',
-    '65': 'Singapore',
-    '66': 'Thailand',
-}
 
-import re
-import pandas as pd
-import phonenumbers
-from phonenumbers import geocoder
+
 
 # Danh sách mã quốc gia phổ biến để tự động thêm dấu +
 COUNTRY_CODES = {
