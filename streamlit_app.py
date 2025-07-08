@@ -98,7 +98,7 @@ def clean_name(name):
 
 # ==============================
 # Giao diện Streamlit
-st.set_page_config(page_title="Thống kê khách hàng siêng học", layout="wide")
+st.set_page_config(page_title="Thống kê KH OFFLINE", layout="wide")
 st.title("📊 Thống Kê Khách Hàng Siêng Năng Nhất Theo Số Lớp Học Offline")
 
 uploaded_file = st.file_uploader("📥 Kéo thả file Excel có nhiều sheets (mỗi sheet là một lớp học):", type=["xlsx"])
