@@ -1,189 +1,118 @@
 import streamlit as st
 import pandas as pd
-import re
-import io
-# ==============================
-# Hàm chuẩn hóa số điện thoại
-import re
-import pandas as pd
-import phonenumbers
-from phonenumbers import geocoder
+from io import BytesIO
 
+st.set_page_config(page_title="📊 Thống kê lớp học ZOOM", layout="wide")
+st.title("📊 Tổng hợp số lần tham gia & điểm danh theo nhân viên")
 
+# ======================= HÀM XUẤT EXCEL =======================
+def to_excel_file(df, sheet_name="Sheet1"):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name=sheet_name)
+    output.seek(0)
+    return output
 
-
-# Danh sách mã quốc gia phổ biến để tự động thêm dấu +
-COUNTRY_CODES = {
-    '886': 'Taiwan',
-    '1': 'USA/Canada',
-    '81': 'Japan',
-    '82': 'South Korea',
-    '85': 'Hong Kong',
-    '86': 'China',
-    '855': 'Cambodia',
-    '856': 'Laos',
-    '95': 'Myanmar',
-    '44': 'UK',
-    '61': 'Australia',
-    '65': 'Singapore',
-    '66': 'Thailand',
-}
-
-def normalize_phone(phone):
-    if pd.isna(phone):
-        return None
-
-    # Làm sạch ký tự đặc biệt, chỉ giữ số và dấu +
-    phone = str(phone).strip()
-    phone = re.sub(r'[^\d+]', '', phone)
-
-    # 1️⃣ Xử lý số Việt Nam bắt đầu bằng +84 hoặc 84
-    if phone.startswith('+84'):
-        phone = '0' + phone[3:]
-    elif phone.startswith('84') and len(phone) in [10, 11]:
-        phone = '0' + phone[2:]
-
-    # 2️⃣ Nếu giờ là số Việt Nam:
-    # - Di động: 10 số, bắt đầu từ 03-09
-    # - Bàn: 11 số, bắt đầu từ 02
-    if (phone.startswith('02') and len(phone) == 11) or \
-       (phone.startswith(('03', '04', '05', '06', '07', '08', '09')) and len(phone) == 10):
-        return phone
-
-    # 3️⃣ Nếu có 9 số và bắt đầu từ 3–9 → thêm 0 rồi kiểm tra lại
-    if len(phone) == 9 and phone[0] in '3456789':
-        phone = '0' + phone
-        if (phone.startswith('02') and len(phone) == 11) or \
-           (phone.startswith(('03', '04', '05', '06', '07', '08', '09')) and len(phone) == 10):
-            return phone
-
-    # 4️⃣ Nếu có dấu + → xử lý bằng thư viện phonenumbers
-    if phone.startswith('+'):
-        try:
-            parsed = phonenumbers.parse(phone, None)
-            if phonenumbers.is_valid_number(parsed):
-                country = geocoder.description_for_number(parsed, 'en')
-                if parsed.country_code == 84:
-                    return None  # Không trả về số Việt Nam dạng +84 nữa
-                return f"{phone} / {country}"
-        except:
-            return None
-
-    # 5️⃣ Nếu không có dấu + nhưng bắt đầu bằng mã quốc gia → thêm +
-    for code in sorted(COUNTRY_CODES.keys(), key=lambda x: -len(x)):
-        if phone.startswith(code) and len(phone) >= len(code) + 7:
-            fake_plus = '+' + phone
+# ======================= HÀM ĐỌC TÊN NHÂN VIÊN =======================
+def extract_all_names(files, selected_col, additional_cols):
+    all_data = []
+    for file in files:
+        xls = pd.ExcelFile(file)
+        for sheet in xls.sheet_names:
             try:
-                parsed = phonenumbers.parse(fake_plus, None)
-                if phonenumbers.is_valid_number(parsed):
-                    country = geocoder.description_for_number(parsed, 'en')
-                    if parsed.country_code == 84:
-                        return None
-                    return f"{fake_plus} / {country}"
-            except:
-                continue
+                df = pd.read_excel(xls, sheet_name=sheet, skiprows=2, engine="openpyxl", dtype=str)
+                if selected_col not in df.columns:
+                    continue
+                sub_df = df[[selected_col] + [col for col in additional_cols if col in df.columns]].copy()
+                sub_df = sub_df.dropna(subset=[selected_col])
+                sub_df["Sheet"] = sheet
+                all_data.append(sub_df)
+            except Exception as e:
+                st.warning(f"⚠️ Lỗi sheet `{sheet}` trong file `{file.name}`: {e}")
+    if all_data:
+        return pd.concat(all_data, ignore_index=True)
+    return pd.DataFrame()
 
-    # ❌ Không hợp lệ
-    return None
+
+# ======================= GIAO DIỆN UPLOAD =======================
+uploaded_files = st.file_uploader("📤 Tải lên các file Excel (.xlsx)", type=["xlsx"], accept_multiple_files=True)
+
+if uploaded_files:
+    try:
+        # Đọc file đầu tiên, sheet đầu tiên để lấy sample
+        sample_df = pd.read_excel(uploaded_files[0], sheet_name=0, skiprows=2, engine="openpyxl", nrows=5, dtype=str)
+        st.subheader("📃 Data mẫu (5 dòng đầu tiên trong sheet đầu tiên)")
+        st.dataframe(sample_df)
+
+        # Chọn cột chính và các cột phụ
+        selected_col = st.selectbox("🔍 Chọn cột để thống kê tên nhân viên", options=sample_df.columns.tolist())
+        additional_cols = st.multiselect("➕ Chọn các cột bổ sung đi kèm", options=[col for col in sample_df.columns if col != selected_col])
+    except Exception as e:
+        st.error(f"❌ Không thể đọc dữ liệu mẫu: {e}")
+        st.stop()
+
+    all_names = extract_all_names(uploaded_files, selected_col, additional_cols)
+
+    if not all_names.empty:
+
+        df_raw = all_names.rename(columns={selected_col: "Tên Nhân Viên", "Sheet": "Buổi Học (Sheet)"})
+
+        # ======================= BẢNG 1 =======================
+        with st.expander("📋 Danh sách tên nhân viên và buổi học (không gộp)", expanded=True):
+            show_cols_1 = st.multiselect("🧩 Chọn cột hiển thị", df_raw.columns.tolist(), default=df_raw.columns.tolist())
 
 
+            st.dataframe(df_raw[show_cols_1], use_container_width=True)
 
-# ==============================
-# Hàm chuẩn hóa tên khách
-def clean_name(name):
-    if pd.isna(name): return ''
-    name = str(name).strip()
-    name = re.sub(r'\s+', ' ', name)
-    return name.title()
+            st.download_button("📥 Tải Excel bảng này", data=to_excel_file(df_raw, "DanhSach"), file_name="bang_1_danh_sach.xlsx")
 
-# ==============================
-# Giao diện Streamlit
-st.set_page_config(page_title="Thống kê KH OFFLINE", layout="wide")
-st.title("📊 Thống Kê Khách Hàng Siêng Năng Nhất Theo Số Lớp Học Offline")
-
-uploaded_file = st.file_uploader("📥 Kéo thả file Excel có nhiều sheets (mỗi sheet là một lớp học và thống kê theo số điện thoại):", type=["xlsx"])
-
-if uploaded_file:
-    xls = pd.ExcelFile(uploaded_file)
-    customer_dict = {}
-    all_cleaned_rows = []
-
-    for sheet in xls.sheet_names:
-        try:
-            df = xls.parse(sheet, skiprows=2, usecols="D:E", names=["Tên", "SĐT"])
-            
-            # Chuẩn hóa dữ liệu
-            df["Tên"] = df["Tên"].apply(clean_name)
-            df["SĐT"] = df["SĐT"].apply(normalize_phone)
-
-            # Xóa dòng không có SĐT
-            df = df.dropna(subset=["SĐT"])
-
-            for _, row in df.iterrows():
-                name = row["Tên"]
-                phone = row["SĐT"]
-
-                if not phone:
-                    continue  # Bỏ dòng nếu không có SĐT
-
-                name = name or "Không rõ"  # Gán tên mặc định nếu rỗng
-
-                # ✅ Ghi lại khách đã chuẩn hóa
-                all_cleaned_rows.append({
-                    "Tên lớp": sheet,
-                    "Tên khách": name,
-                    "SĐT": phone
+        # ======================= BẢNG 2 =======================
+        with st.expander("📊 Tổng hợp tham gia lớp học theo nhân viên", expanded=True):
+            df_summary = (
+                df_raw.groupby("Tên Nhân Viên")
+                .agg({
+                    "Buổi Học (Sheet)": [
+                        "count",
+                        lambda x: len(set(x)),
+                        lambda x: ", ".join(sorted(set(x)))
+                    ]
                 })
-
-                # ✅ Ghi nhận cho thống kê lớp
-                key = (name, phone)
-                if key not in customer_dict:
-                    customer_dict[key] = set()
-                customer_dict[key].add(sheet)
-        except Exception as e:
-            st.warning(f"⚠️ Sheet '{sheet}' lỗi: {e}")
-            continue
-
-    if customer_dict:
-        result_df = pd.DataFrame([
-            {
-                "Tên khách": name,
-                "SĐT": phone,
-                "Số lớp đã tham gia": len(classes),
-                "Tên lớp đã tham gia": ', '.join(sorted(classes))
-            }
-            for (name, phone), classes in customer_dict.items()
-        ])
-
-        result_df = result_df.sort_values(by="Số lớp đã tham gia", ascending=False)
-        st.success("✅ Đã xử lý xong dữ liệu!")
-
-        st.dataframe(result_df, use_container_width=True)
-
-        # ✅ Tải file thống kê
-        buffer = io.BytesIO()
-        result_df.to_excel(buffer, index=False)
-        st.download_button(
-            "📤 Tải kết quả về Excel",
-            buffer.getvalue(),
-            file_name="khach_sieng_nang.xlsx",
-            key="download_summary"
-        )
-
-        # ✅ Tải file toàn bộ khách đã chuẩn hóa
-        if all_cleaned_rows:
-            cleaned_df = pd.DataFrame(all_cleaned_rows)
-            buffer_all = io.BytesIO()
-            cleaned_df.to_excel(buffer_all, index=False)
-            st.download_button(
-                "🧾 Tải file tất cả khách đã chuẩn hóa",
-                buffer_all.getvalue(),
-                file_name="tat_ca_khach_sach.xlsx",
-                key="download_all_cleaned"
             )
-        else:
-            st.info("Không tìm thấy khách hàng hợp lệ trong file.")
+            df_summary.columns = ["Tổng số lần xuất hiện", "Số buổi học khác nhau", "Danh sách buổi học"]
+            df_summary = df_summary.reset_index().sort_values(by="Tổng số lần xuất hiện", ascending=False)
+
+            # 👉 Gộp thêm các cột bổ sung từ df_raw (lấy giá trị đầu tiên)
+            if additional_cols:
+                add_info = df_raw.groupby("Tên Nhân Viên")[additional_cols].first().reset_index()
+                df_summary = pd.merge(df_summary, add_info, on="Tên Nhân Viên", how="left")
+
+            show_cols_2 = st.multiselect("🧩 Chọn cột hiển thị", df_summary.columns.tolist(), default=df_summary.columns.tolist())
+            st.dataframe(df_summary[show_cols_2], use_container_width=True)
+            st.download_button("📥 Tải Excel tổng hợp", data=to_excel_file(df_summary, "TongHop"), file_name="bang_2_tong_hop.xlsx")
+
+
+        # ======================= BẢNG 3 =======================
+        with st.expander("✅ Bảng chấm công (Nhân viên x Buổi học)", expanded=True):
+            df_pivot = pd.pivot_table(
+                df_raw,
+                index="Tên Nhân Viên",
+                columns="Buổi Học (Sheet)",
+                aggfunc="size",
+                fill_value=0
+            )
+            df_pivot = df_pivot.applymap(lambda x: "✅" if x > 0 else "")
+            df_pivot["Tổng buổi tham gia"] = (df_pivot == "✅").sum(axis=1)
+            df_pivot = df_pivot.reset_index()
+
+            # 👉 Gộp thêm các cột bổ sung từ df_raw
+            if additional_cols:
+                add_info = df_raw.groupby("Tên Nhân Viên")[additional_cols].first().reset_index()
+                df_pivot = pd.merge(df_pivot, add_info, on="Tên Nhân Viên", how="left")
+
+            show_cols_3 = st.multiselect("🧩 Chọn cột hiển thị", df_pivot.columns.tolist(), default=df_pivot.columns.tolist())
+            st.dataframe(df_pivot[show_cols_3], use_container_width=True)
+            st.download_button("📥 Tải Excel bảng chấm công", data=to_excel_file(df_pivot, "ChamCong"), file_name="bang_3_cham_cong.xlsx")
+
+
     else:
-        st.warning("Không tìm thấy khách hàng hợp lệ nào để thống kê.")
-else:
-    st.info("📂 Vui lòng upload file Excel để bắt đầu.")
+        st.warning("⚠️ Không tìm thấy dữ liệu hợp lệ trong cột đã chọn.")
